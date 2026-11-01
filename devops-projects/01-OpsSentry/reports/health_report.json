@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-11-01T10:07:00.963369+00:00",
+  "cpu_usage_percent": 0.0,
+  "memory_usage_percent": 8.6,
+  "memory_total_bytes": 8139714560,
+  "memory_available_bytes": 7439958016,
+  "disk_usage_percent": 0.3,
+  "disk_total_bytes": 1081101176832,
+  "disk_free_bytes": 1023153958912,
+  "thresholds": {
+    "cpu_percent": 80,
+    "memory_percent": 85,
+    "disk_percent": 85
+  },
+  "events": [],
+  "status": "OK"
+}

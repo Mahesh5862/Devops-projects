@@ -1,0 +1,10 @@
+{
+  "created_at": "2026-11-01T09:25:34.214275+00:00",
+  "files": {
+    "lab/important.conf": {
+      "sha256": "5fdd801dec760c036bd46d782f1c161af6d30d26edaf9cf433049882b72077ca",
+      "permissions": "0o640",
+      "size_bytes": 20
+    }
+  }
+}

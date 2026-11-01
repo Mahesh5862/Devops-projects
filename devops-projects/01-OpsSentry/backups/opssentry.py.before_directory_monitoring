@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+import hashlib
+import json
+import stat
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = PROJECT_DIR / "config" / "monitored_files.txt"
+BASELINE_FILE = PROJECT_DIR / "data" / "baseline.json"
+REPORT_FILE = PROJECT_DIR / "reports" / "latest_report.json"
+
+
+def current_time():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def file_details(path):
+    info = path.stat()
+    return {
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "permissions": oct(stat.S_IMODE(info.st_mode)),
+        "size_bytes": info.st_size,
+    }
+
+
+def monitored_files():
+    if not CONFIG_FILE.exists():
+        raise FileNotFoundError(f"Missing configuration: {CONFIG_FILE}")
+
+    paths = []
+    for line in CONFIG_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        path = (PROJECT_DIR / line).resolve()
+        if not path.is_relative_to(PROJECT_DIR):
+            raise ValueError(f"Path outside project is not allowed: {line}")
+
+        paths.append((line, path))
+
+    if not paths:
+        raise ValueError("No files configured for monitoring.")
+
+    return paths
+
+
+def create_baseline():
+    baseline = {"created_at": current_time(), "files": {}}
+
+    for name, path in monitored_files():
+        if not path.is_file():
+            print(f"WARNING: File not found: {name}")
+            continue
+        baseline["files"][name] = file_details(path)
+
+    if not baseline["files"]:
+        raise ValueError("No existing files could be added to the baseline.")
+
+    BASELINE_FILE.write_text(json.dumps(baseline, indent=2))
+    print("Baseline created successfully.")
+    print(f"Files recorded: {len(baseline['files'])}")
+
+
+def check_files():
+    if not BASELINE_FILE.exists():
+        raise FileNotFoundError(
+            "No baseline found. Run: python3 src/opssentry.py baseline"
+        )
+
+    baseline = json.loads(BASELINE_FILE.read_text())
+    configured = monitored_files()
+    events = []
+
+    for name, path in configured:
+        previous = baseline["files"].get(name)
+
+        if previous is None:
+            events.append({
+                "file": name,
+                "severity": "MEDIUM",
+                "issue": "File is not recorded in the baseline.",
+            })
+            continue
+
+        if not path.is_file():
+            events.append({
+                "file": name,
+                "severity": "HIGH",
+                "issue": "Monitored file is missing or deleted.",
+            })
+            continue
+
+        current = file_details(path)
+
+        if current["permissions"] != previous["permissions"]:
+            events.append({
+                "file": name,
+                "severity": "HIGH",
+                "issue": "File permissions have changed.",
+                "expected": previous["permissions"],
+                "current": current["permissions"],
+            })
+
+        if current["permissions"] in {"0o777", "0o666", "0o757", "0o767"}:
+            events.append({
+                "file": name,
+                "severity": "HIGH",
+                "issue": "Risky permissions detected.",
+                "current": current["permissions"],
+            })
+
+        if current["sha256"] != previous["sha256"]:
+            events.append({
+                "file": name,
+                "severity": "MEDIUM",
+                "issue": "File contents have changed.",
+            })
+
+    report = {
+        "checked_at": current_time(),
+        "status": "ALERT" if events else "OK",
+        "files_checked": len(configured),
+        "events": events,
+    }
+
+    REPORT_FILE.write_text(json.dumps(report, indent=2))
+
+    print(f"OpsSentry status: {report['status']}")
+    print(f"Files checked: {report['files_checked']}")
+    print(f"Issues detected: {len(events)}")
+
+    for event in events:
+        print(f"\n[{event['severity']}] {event['file']}")
+        print(f"Issue: {event['issue']}")
+        if "expected" in event:
+            print(f"Expected permissions: {event['expected']}")
+            print(f"Current permissions: {event['current']}")
+
+    print(f"Report saved to: {REPORT_FILE}")
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in {"baseline", "check"}:
+        print("Usage: python3 src/opssentry.py [baseline|check]")
+        raise SystemExit(1)
+
+    try:
+        if sys.argv[1] == "baseline":
+            create_baseline()
+        else:
+            check_files()
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Error: {error}") from error
+
+
+if __name__ == "__main__":
+    main()
+
